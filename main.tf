@@ -13,11 +13,47 @@ terraform {
 provider "yandex" {
   cloud_id = var.cloud_id
   folder_id = var.folder_id
-  service_account_key_file = "./key.json"
+  service_account_key_file = pathexpand("~/.yc-keys/key.json")
 }
 
 provider "telegram" {
   bot_token = var.TELEGRAM_BOT_TOKEN
+}
+
+resource "yandex_iam_service_account" "sa" {
+  name = "vvot30-ai-model"
+}
+
+resource "yandex_resourcemanager_folder_iam_binding" "storage_viewer" {
+  folder_id = var.folder_id
+  role      = "storage.viewer"
+  members = [
+    "serviceAccount:${yandex_iam_service_account.sa.id}"
+  ]
+}
+
+resource "yandex_resourcemanager_folder_iam_binding" "ai_language_model_user" {
+  folder_id = var.folder_id
+  role      = "ai.languageModels.user"
+  members = [
+    "serviceAccount:${yandex_iam_service_account.sa.id}"
+  ]
+}
+
+resource "yandex_resourcemanager_folder_iam_binding" "ai_vision_user" {
+  folder_id = var.folder_id
+  role      = "ai.vision.user"
+  members = [
+    "serviceAccount:${yandex_iam_service_account.sa.id}"
+  ]
+}
+
+resource "yandex_iam_service_account_api_key" "sa-api-key" {
+  service_account_id = yandex_iam_service_account.sa.id
+}
+
+resource "yandex_iam_service_account_static_access_key" "sa-auth-key" {
+  service_account_id = yandex_iam_service_account.sa.id
 }
 
 resource "yandex_storage_bucket" "bucket" {
@@ -46,7 +82,7 @@ resource "yandex_function" "func" {
   entrypoint = "index.handler"
   memory = 128
   execution_timeout  = "20"
-  environment = {"TELEGRAM_BOT_TOKEN"= var.TELEGRAM_BOT_TOKEN, "SA_API_SECRET_KEY"=var.SA_API_SECRET_KEY, "SA_AWS_PUBLIC"=var.SA_AWS_PUBLIC, "SA_AWS_SECRET"=var.SA_AWS_SECRET, "BUCKET"="vvot30", "PROMPT_FILE"="prompt.json"}
+  environment = {"TELEGRAM_BOT_TOKEN"= var.TELEGRAM_BOT_TOKEN, "SA_API_SECRET_KEY"=yandex_iam_service_account_api_key.sa-api-key.secret_key, "SA_AWS_PUBLIC"=yandex_iam_service_account_static_access_key.sa-auth-key.access_key, "SA_AWS_SECRET"=yandex_iam_service_account_static_access_key.sa-auth-key.secret_key, "BUCKET"="vvot30", "PROMPT_FILE"="prompt.json"}
   content {
     zip_filename = archive_file.zip.output_path
   }
@@ -57,18 +93,6 @@ resource "telegram_bot_webhook" "webhook" {
 }
 
 variable "TELEGRAM_BOT_TOKEN" {
-  type = string
-}
-
-variable "SA_API_SECRET_KEY" {
-  type = string
-}
-
-variable "SA_AWS_PUBLIC" {
-  type = string
-}
-
-variable "SA_AWS_SECRET" {
   type = string
 }
 
